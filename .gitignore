@@ -1,0 +1,26 @@
+# OS junk
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Node
+node_modules/
+npm-debug.log*
+pnpm-debug.log*
+.npm/
+.pnpm-store/
+
+# Credentials and keys must never enter the repository
+ssh-credentials.json
+*.pem
+*.key
+*.ppk
+
+# Local scratch
+*.log
+coverage/

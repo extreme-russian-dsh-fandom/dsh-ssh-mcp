@@ -1,0 +1,45 @@
+{
+  "name": "dsh-ssh-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Persistent SSH sessions for DeepSeek Harness: credential profiles, sudo and root safeguards, fail2ban-aware retry limits, and SFTP.",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "mcp",
+    "ssh",
+    "sftp",
+    "remote-administration",
+    "fail2ban"
+  ],
+  "exports": {
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "cordis.patch.yml",
+    "server/*.mjs",
+    "locale/*.json",
+    "icon.svg",
+    "examples/*.json",
+    "skill/remote-ssh/SKILL.md",
+    "README.md",
+    "README.ru.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test --test-isolation=none \"server/test/*.test.mjs\""
+  }
+}

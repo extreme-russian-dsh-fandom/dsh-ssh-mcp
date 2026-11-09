@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "SSH remote administration",
+    "description": "Persistent SSH sessions with credential profiles, key or agent authentication, sudo and root safeguards, and fail2ban-aware retry limits."
+  }
+}

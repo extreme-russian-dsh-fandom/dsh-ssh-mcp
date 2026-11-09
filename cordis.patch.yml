@@ -1,0 +1,24 @@
+# dsh-ssh-mcp: persistent SSH sessions as MCP tools.
+#
+# The stdio child is the same binary that runs the Harness, switched into Node
+# mode, so no system Node.js install is required. The server file is resolved
+# inside this package in the profile's node_modules.
+#
+# Overrides (environment variables):
+#   DSH_SSH_MCP_NODE         executor binary; defaults to the running harness binary
+#   DSH_SSH_MCP_SERVER       absolute path to server/index.mjs
+#   DSH_SSH_MCP_TIMEOUT_MS   per-call timeout; defaults to 600000
+- insert:
+    - id: ssh-mcp
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: ssh
+        transport: stdio
+        command: !!js process.env.DSH_SSH_MCP_NODE ?? process.execPath
+        args:
+          - !!js process.env.DSH_SSH_MCP_SERVER ?? process.cwd() + '/node_modules/dsh-ssh-mcp/server/index.mjs'
+        env:
+          ELECTRON_RUN_AS_NODE: '1'
+        cwd: !!js process.cwd()
+        toolCallTimeoutMs: !!js process.env.DSH_SSH_MCP_TIMEOUT_MS ? Number(process.env.DSH_SSH_MCP_TIMEOUT_MS) : 600000
+        failOnStartupError: true
