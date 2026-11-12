@@ -50,6 +50,9 @@ ssh-agent держит ключ. Если `open` вернул `auth_failed`:
 - Ошибки различаются по коду: `auth_failed`, `connection_refused`,
   `network_unreachable`, `timeout`, `dns_failed`, `host_key_rejected`. Для
   каждого в ответе есть подсказка, что именно проверить.
+- Чисто локальные сбои (`local_path_missing`, `path_missing`, `spawn_failed`)
+  бюджет не расходуют: до хоста дело не дошло. Не путать их с отказом в
+  авторизации и не просить пользователя чинить ключи.
 
 ## Root и sudo
 
@@ -86,6 +89,8 @@ ssh-agent держит ключ. Если `open` вернул `auth_failed`:
 | `network_unreachable`, `timeout` | Проверить адрес, firewall, VPN; не долбить повторно |
 | `host_key_rejected` | Остановиться: ключ хоста изменился, это решает пользователь |
 | `session_dead` | Сессия закрыта (обрыв, таймаут команды) — открыть заново |
+| `local_path_missing`, `path_missing` | Проверить оба пути; локальный путь отсчитывается от workspace, а не от cwd удалённой сессии. Бюджет попыток не тратится |
+| `spawn_failed` | В `PATH` нет `ssh`/`scp` — сказать пользователю. Бюджет попыток не тратится |
 | `sudo_not_applicable` | Сессия под root: повторить команду без sudo |
 | `sudo_requires_password` | Нужен NOPASSWD или ручное выполнение |
 

@@ -58,3 +58,12 @@ test('the public projection never exposes secrets', () => {
   assert.equal(JSON.stringify(view).includes('id_ed25519'), false)
   assert.equal(view[0].hasKeyFile, true)
 })
+
+test('a UTF-8 byte-order mark does not make the file look corrupt', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'ssh-mcp-bom-'))
+  const path = join(directory, 'ssh-credentials.json')
+  writeFileSync(path, '\uFEFF' + JSON.stringify({ hosts: { bom: { host: 'h.example' } } }))
+  const loaded = loadCredentials(path)
+  assert.equal(loaded.error, undefined)
+  assert.equal(resolveProfile(loaded, 'bom').host, 'h.example')
+})

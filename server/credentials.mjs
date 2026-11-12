@@ -98,7 +98,10 @@ export function loadCredentials(path) {
 
   let document
   try {
-    document = JSON.parse(text)
+    // Windows editors and PowerShell's `Set-Content -Encoding utf8` prepend a
+    // byte-order mark; JSON.parse rejects it, which would look like a corrupt
+    // file even though the content is valid.
+    document = JSON.parse(text.replace(/^\uFEFF/, ''))
   } catch (error) {
     return { path, exists: true, hosts: {}, defaults: DEFAULT_PROFILE, error: 'credentials file is not valid JSON: ' + error.message }
   }

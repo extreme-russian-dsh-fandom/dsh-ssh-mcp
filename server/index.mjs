@@ -6,10 +6,10 @@ import { homedir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
 
 import { CREDENTIALS_TEMPLATE, CredentialsError, loadCredentials, publicProfiles, resolveProfile } from './credentials.mjs'
-import { AttemptBudget, classifyCommand } from './policy.mjs'
+import { AttemptBudget, chargesBudget, classifyCommand, failureHint } from './policy.mjs'
 import { scpTransfer, SshError, SshSession, probe, sudoExec } from './ssh.mjs'
 
-const SERVER_INFO = { name: 'ssh-mcp', version: '1.0.0' }
+const SERVER_INFO = { name: 'ssh-mcp', version: '1.0.1' }
 const PROTOCOL_FALLBACK = '2025-06-18'
 const DEFAULT_TIMEOUT_MS = 60000
 const MAX_TIMEOUT_MS = 600000
@@ -18,7 +18,7 @@ const MAX_OUTPUT_BYTES = 192 * 1024
 const INSTRUCTIONS = [
   'Remote SSH rules for this workspace (they override convenience):',
   '',
-  '1. fail2ban: a rejected login can ban this address for hours. Never retry with other users, keys, ports, or guessed credentials. A failed connection gets at most one retry per host; after that, stop and ask the user to repair connectivity before doing anything else.',
+  '1. fail2ban: a rejected login can ban this address for hours. Never retry with other users, keys, ports, or guessed credentials. A failed connection gets at most one retry per host; purely local errors (a bad local path, a missing OpenSSH client) are not counted. After that, stop and ask the user to repair connectivity before doing anything else.',
   '2. Root logins: when a session reports is_root true, sudo is unavailable on many systems and would fail otherwise valid commands. Never call exec with sudo=true in a root session.',
   '3. Confirmation: ask the user before sudo and before any destructive command, then repeat the call with confirmed=true. Never confirm on the user\'s behalf.',
   '4. Credentials live in ssh-credentials.json in this workspace. Never ask the user to paste a password or private key into chat; ask them to edit that file instead.',
@@ -76,14 +76,14 @@ const TOOLS = [
   },
   {
     name: 'put',
-    description: 'Copy a local file or directory to the remote host with scp, reusing a profile. Counts against the same per-host connection budget as open.',
+    description: 'Copy a local file or directory to the remote host with scp, reusing a profile. Connection failures count against the same per-host connection budget as open; purely local failures (a missing local path, a missing OpenSSH client) are reported without charging that budget.',
     inputSchema: {
       type: 'object',
       properties: {
         profile: { type: 'string' },
-        local_path: { type: 'string', description: 'Absolute local path inside the workspace, or a path relative to the session working directory.' },
-        remote_path: { type: 'string', description: 'Destination path on the remote host.' },
-        recursive: { type: 'boolean', description: 'Copy a directory tree.' },
+        local_path: { type: 'string', description: 'Absolute local path, or a path relative to the server workspace directory. The path must already exist; ~ is not expanded.' },
+        remote_path: { type: 'string', description: 'Destination path on the remote host. Its parent directory must exist; scp does not create it.' },
+        recursive: { type: 'boolean', description: 'Copy a directory tree; required when local_path is a directory.' },
       },
       required: ['profile', 'local_path', 'remote_path'],
       additionalProperties: false,
@@ -91,14 +91,14 @@ const TOOLS = [
   },
   {
     name: 'get',
-    description: 'Copy a remote file or directory to the local workspace with scp, reusing a profile. Counts against the same per-host connection budget as open.',
+    description: 'Copy a remote file or directory to the local workspace with scp, reusing a profile. Connection failures count against the same per-host connection budget as open; purely local failures are reported without charging that budget.',
     inputSchema: {
       type: 'object',
       properties: {
         profile: { type: 'string' },
         remote_path: { type: 'string', description: 'Source path on the remote host.' },
-        local_path: { type: 'string', description: 'Destination path, absolute or relative to the workspace.' },
-        recursive: { type: 'boolean', description: 'Copy a directory tree.' },
+        local_path: { type: 'string', description: 'Destination path, absolute or relative to the server workspace directory. Its parent directory must exist.' },
+        recursive: { type: 'boolean', description: 'Copy a directory tree; required when remote_path is a directory.' },
       },
       required: ['profile', 'remote_path', 'local_path'],
       additionalProperties: false,
@@ -169,25 +169,14 @@ function budgetKey(profile) {
   return profile.host + ':' + String(profile.port)
 }
 
-function failureHint(code, remaining) {
-  const base = remaining > 0
-    ? 'One retry is allowed. Do not try other users, keys or ports.'
-    : 'No attempts left for this host. Stop here and ask the user to repair SSH connectivity (authorized_keys, port, fail2ban, network) before continuing.'
-  switch (code) {
-    case 'auth_failed':
-      return 'The remote host rejected authentication. ' + base + ' The user must add the public key to authorized_keys or fix the ssh-agent.'
-    case 'connection_refused':
-      return 'Nothing accepted the connection on this host and port. ' + base + ' The port may be wrong or sshd may be listening elsewhere.'
-    case 'network_unreachable':
-    case 'timeout':
-      return 'The host did not answer in time. ' + base + ' Check the address, port, firewall and network path.'
-    case 'dns_failed':
-      return 'The host name did not resolve. ' + base + ' Ask the user for the correct address.'
-    case 'host_key_rejected':
-      return 'The host key does not match known_hosts. Stop and ask the user; do not weaken host key checking.'
-    default:
-      return base
-  }
+/**
+ * Local transfer paths are resolved against the server's working directory,
+ * which is the workspace at launch. scp expands neither `~` nor shell
+ * variables, so the path is passed exactly as resolved.
+ */
+function resolveLocalPath(value) {
+  const text = String(value)
+  return isAbsolute(text) ? text : resolve(workspace, text)
 }
 
 async function toolProfiles() {
@@ -236,17 +225,26 @@ async function toolOpen(args) {
         message: 'Connection attempts to ' + key + ' are exhausted for this process. Do not try again.',
       },
       attempts: state,
-      hint: failureHint('auth_failed', state.remaining),
+      hint: failureHint(state.lastFailureCode ?? 'ssh_failed', state.remaining),
     })
   }
 
   const probeResult = await probe(profile, profile.connectTimeoutMs + 5000)
   if (!probeResult.ok) {
-    const after = budget.recordFailure(key, profile.fail2ban)
+    const code = probeResult.code ?? 'ssh_failed'
+    const snapshot = budget.snapshot(key, profile.fail2ban)
+    if (!chargesBudget(code)) {
+      return refuse({
+        error: { code, message: probeResult.stderr || 'Connection failed' },
+        attempts: snapshot,
+        hint: failureHint(code, snapshot.remaining),
+      })
+    }
+    const after = budget.recordFailure(key, profile.fail2ban, code)
     return refuse({
-      error: { code: probeResult.code, message: probeResult.stderr || 'Connection failed' },
+      error: { code, message: probeResult.stderr || 'Connection failed' },
       attempts: after,
-      hint: failureHint(probeResult.code, after.remaining),
+      hint: failureHint(code, after.remaining),
     })
   }
   budget.recordSuccess(key)
@@ -256,8 +254,12 @@ async function toolOpen(args) {
   try {
     await session.open()
   } catch (error) {
-    const after = budget.recordFailure(key, profile.fail2ban)
     const code = error instanceof SshError ? error.code : 'ssh_failed'
+    if (!chargesBudget(code)) {
+      const snapshot = budget.snapshot(key, profile.fail2ban)
+      return refuse({ error: { code, message: error.message }, attempts: snapshot, hint: failureHint(code, snapshot.remaining) })
+    }
+    const after = budget.recordFailure(key, profile.fail2ban, code)
     return refuse({ error: { code, message: error.message }, attempts: after, hint: failureHint(code, after.remaining) })
   }
 
@@ -383,16 +385,28 @@ async function transfer(args, direction) {
     if (error instanceof CredentialsError) return refuse({ error: { code: error.code, message: error.message } })
     throw error
   }
-  const localPath = isAbsolute(args.local_path) ? args.local_path : resolve(workspace, args.local_path)
-  if (direction === 'put' && !existsSync(localPath)) {
-    return refuse({ error: { code: 'local_missing', message: 'Local path does not exist: ' + localPath } })
+  if (typeof args.local_path !== 'string' || args.local_path.trim() === '') {
+    return refuse({ error: { code: 'invalid_argument', message: 'local_path must be a non-empty string' } })
   }
+  if (typeof args.remote_path !== 'string' || args.remote_path.trim() === '') {
+    return refuse({ error: { code: 'invalid_argument', message: 'remote_path must be a non-empty string' } })
+  }
+  const localPath = resolveLocalPath(args.local_path)
   const key = budgetKey(profile)
+  const snapshot = budget.snapshot(key, profile.fail2ban)
+  if (direction === 'put' && !existsSync(localPath)) {
+    return refuse({
+      error: { code: 'local_path_missing', message: 'Local path does not exist: ' + localPath },
+      attempts: snapshot,
+      hint: failureHint('local_path_missing', snapshot.remaining),
+    })
+  }
   const state = budget.check(key, profile.fail2ban)
   if (!state.allowed) {
     return refuse({
       error: { code: 'connect_halted', message: 'Connection attempts to ' + key + ' are exhausted for this process.' },
       attempts: state,
+      hint: failureHint(state.lastFailureCode ?? 'ssh_failed', state.remaining),
     })
   }
   try {
@@ -407,7 +421,13 @@ async function transfer(args, direction) {
     return ok({ direction, profile: profile.alias, local_path: localPath, remote_path: args.remote_path })
   } catch (error) {
     const code = error instanceof SshError ? error.code : 'transfer_failed'
-    const after = budget.recordFailure(key, profile.fail2ban)
+    if (!chargesBudget(code)) {
+      // A purely local failure must not consume a fail2ban attempt: nothing was
+      // sent to the host, and a missing local path is not a rejected login.
+      const snapshot = budget.snapshot(key, profile.fail2ban)
+      return refuse({ error: { code, message: error.message }, attempts: snapshot, hint: failureHint(code, snapshot.remaining) })
+    }
+    const after = budget.recordFailure(key, profile.fail2ban, code)
     return refuse({ error: { code, message: error.message }, attempts: after, hint: failureHint(code, after.remaining) })
   }
 }

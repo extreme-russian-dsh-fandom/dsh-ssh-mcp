@@ -1,16 +1,16 @@
 {
   "name": "dsh-ssh-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
-  "description": "Persistent SSH sessions for DeepSeek Harness: credential profiles, sudo and root safeguards, fail2ban-aware retry limits, and SFTP.",
+  "description": "Persistent SSH sessions for DeepSeek Harness: credential profiles, sudo and root safeguards, fail2ban-aware retry limits, and scp file transfer.",
   "license": "MIT",
   "keywords": [
     "dsh",
     "deepseek-harness",
     "mcp",
     "ssh",
-    "sftp",
+    "scp",
     "remote-administration",
     "fail2ban"
   ],

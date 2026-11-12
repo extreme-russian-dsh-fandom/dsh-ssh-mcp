@@ -8,6 +8,54 @@
 const MAX_ATTEMPTS_DEFAULT = 2
 const MAX_ATTEMPTS_NO_FAIL2BAN = 3
 
+/**
+ * Failure codes that do not prove the host rejected a connection: a bad local
+ * path, a missing scp/ssh binary, a rejected argument, or our own transfer
+ * deadline expiring after the connection already worked. Charging them to the
+ * per-host budget would halt a host that is perfectly reachable, so they are
+ * deliberately free.
+ */
+const FREE_FAILURE_CODES = new Set(['spawn_failed', 'local_path_missing', 'path_missing', 'invalid_argument', 'transfer_timeout'])
+
+/** Whether a failure code counts as a connection attempt against fail2ban. */
+export function chargesBudget(code) {
+  return !FREE_FAILURE_CODES.has(String(code ?? 'ssh_failed'))
+}
+
+/**
+ * Human hint for an error code. The code that actually spent the budget must be
+ * passed in: describing a refused connection as a rejected key sends the agent
+ * and the user to repair credentials that were never broken.
+ */
+export function failureHint(code, remaining = 0) {
+  const base = remaining > 0
+    ? 'One retry is allowed. Do not try other users, keys or ports.'
+    : 'No attempts left for this host. Stop here and ask the user to repair SSH connectivity (port, keys, fail2ban, network) before continuing.'
+  switch (code) {
+    case 'auth_failed':
+      return 'The remote host rejected authentication. ' + base + ' The user must add the public key to authorized_keys or fix the ssh-agent.'
+    case 'connection_refused':
+      return 'Nothing accepted the connection on this host and port. ' + base + ' The port may be wrong or sshd may be listening elsewhere.'
+    case 'network_unreachable':
+    case 'timeout':
+      return 'The host did not answer in time. ' + base + ' Check the address, port, firewall and network path.'
+    case 'dns_failed':
+      return 'The host name did not resolve. ' + base + ' Ask the user for the correct address.'
+    case 'host_key_rejected':
+      return 'The host key does not match known_hosts. Stop and ask the user; do not weaken host key checking.'
+    case 'local_path_missing':
+      return 'The local path does not exist, so nothing was sent and no connection was attempted. Correct the path and retry; the attempt budget was not charged.'
+    case 'path_missing':
+      return 'A path on one side of the transfer is missing or is not a regular file, so nothing was copied and the attempt budget was not charged. Check both paths; for a directory pass recursive=true.'
+    case 'spawn_failed':
+      return 'ssh or scp could not be started. Ask the user to install the OpenSSH client or add it to PATH. This is a local failure; the attempt budget was not charged.'
+    case 'transfer_timeout':
+      return 'The transfer exceeded its deadline and was stopped; the attempt budget was not charged. Retry only after checking the link, and remove any partial file on the destination first.'
+    default:
+      return base
+  }
+}
+
 export class AttemptBudget {
   constructor() {
     this.hosts = new Map()
@@ -22,12 +70,14 @@ export class AttemptBudget {
     const failures = state === undefined ? 0 : state.failures
     const max = this.maxAttempts(fail2ban)
     const lastFailureAt = state === undefined ? undefined : state.lastFailureAt
+    const lastFailureCode = state === undefined ? undefined : state.lastFailureCode
     return {
       used: failures,
       max,
       remaining: Math.max(0, max - failures),
       halted: failures >= max,
       lastFailureAt,
+      lastFailureCode,
     }
   }
 
@@ -40,10 +90,11 @@ export class AttemptBudget {
     return { ...snapshot, allowed: true }
   }
 
-  recordFailure(key, fail2ban) {
+  recordFailure(key, fail2ban, code = 'ssh_failed') {
     const state = this.hosts.get(key) ?? { failures: 0 }
     state.failures += 1
     state.lastFailureAt = Date.now()
+    state.lastFailureCode = code
     this.hosts.set(key, state)
     return this.snapshot(key, fail2ban)
   }

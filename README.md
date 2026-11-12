@@ -33,8 +33,10 @@ them:
   `mkfs`, `dd of=/dev/...`, `reboot`, package removal, `DROP DATABASE`, …).
 - Error classification with an actionable hint: `auth_failed`,
   `connection_refused`, `network_unreachable`, `dns_failed`,
-  `host_key_rejected`, `connect_halted`.
-- `put` / `get` for file transfer over scp.
+  `host_key_rejected`, `connect_halted`, plus `local_path_missing`,
+  `path_missing`, `spawn_failed` and `transfer_timeout`.
+- `put` / `get` for file transfer over scp, with local paths resolved against
+  the workspace.
 - Server instructions carry the safety rules into the system prompt; an optional
   skill adds the full playbook.
 
@@ -86,6 +88,11 @@ After activation the tools appear as `mcp__ssh__<tool>`.
 | `mcp__ssh__close` | Closes a session and releases the connection. |
 | `mcp__ssh__put` | Copies a local file or directory to the host with scp. |
 | `mcp__ssh__get` | Copies a remote file or directory into the workspace with scp. |
+
+`put` and `get` resolve a relative `local_path` against the server's working
+directory (the workspace at launch), not against the remote session's working
+directory. The parent directory of the destination must already exist, and scp
+expands neither `~` nor shell variables; pass absolute paths when in doubt.
 
 ## Credentials
 
@@ -151,7 +158,7 @@ or use an ssh-agent. A profile that declares `passwordFile` fails with
 
 | Rule | Behaviour |
 | --- | --- |
-| fail2ban awareness | Failed connections are counted per `host:port`. After the budget is spent, the host is halted for the life of the process and the tool tells the agent to stop and ask the user. |
+| fail2ban awareness | Failed connections are counted per `host:port`. After the budget is spent, the host is halted for the life of the process and the tool tells the agent to stop and ask the user. Purely local failures (a missing local path, a missing OpenSSH client) are not counted, because they never reach the host. |
 | Root sessions | `open` reports `is_root`. `exec` with `sudo: true` in a root session returns `sudo_not_applicable`; the command must be repeated without sudo. |
 | Confirmations | `sudo` and destructive commands require `confirmed: true`, which the agent may set only after the user explicitly agrees. |
 | Secrets | The credentials file path is the only thing the model sees; it never receives key material or passwords. |
@@ -186,7 +193,9 @@ cp skill/remote-ssh/SKILL.md ~/.dsh/skills/remote-ssh/
 | No `mcp__ssh__*` tools | The MCP server failed to start. Check that `ssh.exe`/`ssh` is on `PATH` and that the hostname is correct. |
 | `credential_missing` | Create `~/.dsh/ssh-credentials.json`; `mcp__ssh__profiles` returns a template. |
 | `auth_failed` | The remote host does not accept the key. Add the public key to `authorized_keys`; the plugin allows one retry only. |
-| `connect_halted` | The attempt budget for this host is spent. Fix connectivity, then restart the harness process. |
+| `connect_halted` | The attempt budget for this host is spent. Fix connectivity, then restart the harness process. The hint names the failure code that consumed it. |
+| `local_path_missing`, `path_missing` | One side of a `put`/`get` has no such path; nothing was copied and no attempt was charged. Check both paths (relative local paths resolve against the workspace). |
+| `spawn_failed` | `ssh` or `scp` could not be started. Install the OpenSSH client or add it to `PATH`; this local failure does not consume the attempt budget. |
 | `sudo_requires_password` | Passwordless sudo is not configured. Add a `NOPASSWD` rule or run the command manually. |
 | `host_key_rejected` | The host key changed. Verify the host and update `known_hosts`; the plugin never weakens host key checking. |
 

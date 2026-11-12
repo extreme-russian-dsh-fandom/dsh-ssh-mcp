@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { AttemptBudget, classifyCommand } from '../policy.mjs'
+import { AttemptBudget, chargesBudget, classifyCommand, failureHint } from '../policy.mjs'
 
 test('recognises destructive commands', () => {
   assert.notEqual(classifyCommand('rm -rf /'), null)
@@ -54,4 +54,37 @@ test('a success clears the failure history', () => {
   budget.recordFailure('example:22', 'present')
   budget.recordSuccess('example:22')
   assert.equal(budget.snapshot('example:22', 'present').remaining, 2)
+})
+
+test('failures that do not prove a rejected connection are not charged', () => {
+  assert.equal(chargesBudget('spawn_failed'), false)
+  assert.equal(chargesBudget('local_path_missing'), false)
+  assert.equal(chargesBudget('path_missing'), false)
+  assert.equal(chargesBudget('invalid_argument'), false)
+  assert.equal(chargesBudget('transfer_timeout'), false)
+  assert.equal(chargesBudget('auth_failed'), true)
+  assert.equal(chargesBudget('connection_refused'), true)
+  assert.equal(chargesBudget('network_unreachable'), true)
+  assert.equal(chargesBudget('host_key_rejected'), true)
+  assert.equal(chargesBudget('timeout'), true)
+  assert.equal(chargesBudget('ssh_failed'), true)
+  assert.equal(chargesBudget(undefined), true)
+})
+
+test('the halt keeps the code that exhausted the budget', () => {
+  const budget = new AttemptBudget()
+  budget.recordFailure('example:22', 'present', 'connection_refused')
+  budget.recordFailure('example:22', 'present', 'connection_refused')
+  const state = budget.check('example:22', 'present')
+  assert.equal(state.halted, true)
+  assert.equal(state.lastFailureCode, 'connection_refused')
+})
+
+test('a halt names the failure that spent the budget, not credentials', () => {
+  const refused = failureHint('connection_refused', 0)
+  assert.match(refused, /Nothing accepted the connection/)
+  assert.doesNotMatch(refused, /authorized_keys/)
+  assert.match(failureHint('auth_failed', 0), /authorized_keys/)
+  assert.match(failureHint('dns_failed', 1), /did not resolve/)
+  assert.match(failureHint('spawn_failed', 2), /budget was not charged/)
 })
