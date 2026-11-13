@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.1.0 — 2026-11-13
+
+Quality release for MCP directories: every tool now carries complete, accurate
+annotations, and the test suite covers all seven tools instead of only the lower
+layers.
+
+- Every tool declares `title` and all four MCP annotations (`readOnlyHint`,
+  `destructiveHint`, `idempotentHint`, `openWorldHint`) as explicit booleans.
+  `exec`, `put` and `get` are destructive; `open`, `exec`, `put` and `get` are
+  open-world; `put` and `get` are idempotent. A metadata test fails if a hint is
+  missing, is not a boolean, or drifts from the documented table.
+- Tool descriptions and both READMEs now state that `put` and `get` overwrite an
+  existing destination file.
+- Tool handlers moved to `server/tools.mjs` with injectable network seams, and
+  the JSON-RPC envelope moved to `server/rpc.mjs`; `server/index.mjs` now only
+  parses argv, wires the transport, and shuts down.
+- Tests: per-tool coverage for `profiles`, `open`, `exec`, `sessions`, `close`,
+  `put` and `get`; protocol tests for `initialize`, `tools/list`, `tools/call`,
+  parse errors and drain-on-close; a real stdio handshake test.
+- CI runs the suite on Node.js 22 and 24.
+- Package metadata gains `repository`, `homepage` and `bugs`.
+
 ## 1.0.1 — 2026-11-12
 
 File transfer was broken for every target and every path; this release fixes it

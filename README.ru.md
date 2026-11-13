@@ -69,7 +69,7 @@ dsh plugin --profile <profile> add github:extreme-russian-dsh-fandom/dsh-ssh-mcp
 Для воспроизводимости закрепите ревизию:
 
 ```sh
-dsh plugin --profile <profile> add github:extreme-russian-dsh-fandom/dsh-ssh-mcp#v1.0.0
+dsh plugin --profile <profile> add github:extreme-russian-dsh-fandom/dsh-ssh-mcp#v1.1.0
 ```
 
 `github:` — это сокращение pnpm, а не схема DSH: `dsh plugin` передаёт аргумент в
@@ -92,7 +92,29 @@ pnpm, а Plugin Manager предварительно проверяет репо
 `put` и `get` считают относительный `local_path` от рабочего каталога сервера
 (workspace на момент запуска), а не от рабочего каталога удалённой сессии.
 Каталог назначения должен существовать; scp не раскрывает ни `~`, ни переменные
-оболочки, поэтому при сомнениях передавайте абсолютный путь.
+оболочки, поэтому при сомнениях передавайте абсолютный путь. Оба инструмента
+перезаписывают существующий файл назначения — проверяйте путь перед копированием.
+
+## Аннотации инструментов
+
+У каждого инструмента есть человекочитаемый `title` и все четыре аннотации MCP
+с явными boolean-значениями:
+
+| Инструмент | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
+| --- | --- | --- | --- | --- |
+| `profiles` | `true` | `false` | `true` | `false` |
+| `open` | `false` | `false` | `false` | `true` |
+| `exec` | `false` | `true` | `false` | `true` |
+| `sessions` | `true` | `false` | `true` | `false` |
+| `close` | `false` | `false` | `true` | `false` |
+| `put` | `false` | `true` | `true` | `true` |
+| `get` | `false` | `true` | `true` | `true` |
+
+`exec` помечен destructive, потому что выполняет произвольную команду, а не
+потому что каждая команда разрушительна. `put` и `get` помечены destructive,
+потому что scp перезаписывает файл назначения без подтверждения. Аннотации
+позволяют хосту предупредить пользователя; [модель безопасности](#модель-безопасности)
+при этом продолжает требовать подтверждения сама.
 
 ## Файл доступов
 
@@ -204,6 +226,20 @@ cp skill/remote-ssh/SKILL.md ~/.dsh/skills/remote-ssh/
 ```sh
 dsh plugin --profile <profile> remove dsh-ssh-mcp
 ```
+
+## Разработка
+
+У пакета нет ни runtime-, ни dev-зависимостей. Набор использует
+`--test-isolation=none`, поэтому нужен Node.js 22.8 или новее:
+
+```sh
+npm test
+```
+
+`server/test/tools.test.mjs` покрывает все семь инструментов,
+`tools.metadata.test.mjs` защищает аннотации, `rpc.test.mjs` — JSON-RPC-оболочку,
+а `index.test.mjs` выполняет реальный stdio-хендшейк, когда окружение разрешает
+запуск дочернего процесса. CI гоняет набор на Node.js 22 и 24.
 
 ## Лицензия
 

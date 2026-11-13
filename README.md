@@ -70,7 +70,7 @@ dsh plugin --profile <profile> add github:extreme-russian-dsh-fandom/dsh-ssh-mcp
 Pin a revision when you need reproducibility:
 
 ```sh
-dsh plugin --profile <profile> add github:extreme-russian-dsh-fandom/dsh-ssh-mcp#v1.0.0
+dsh plugin --profile <profile> add github:extreme-russian-dsh-fandom/dsh-ssh-mcp#v1.1.0
 ```
 
 `github:` is pnpm's GitHub shorthand, not a DSH-specific scheme: `dsh plugin`
@@ -95,6 +95,29 @@ After activation the tools appear as `mcp__ssh__<tool>`.
 directory (the workspace at launch), not against the remote session's working
 directory. The parent directory of the destination must already exist, and scp
 expands neither `~` nor shell variables; pass absolute paths when in doubt.
+Both tools overwrite an existing destination file, so check the destination
+path before copying.
+
+## Tool annotations
+
+Every tool declares a human-readable `title` and all four MCP annotations with
+explicit boolean values:
+
+| Tool | `readOnlyHint` | `destructiveHint` | `idempotentHint` | `openWorldHint` |
+| --- | --- | --- | --- | --- |
+| `profiles` | `true` | `false` | `true` | `false` |
+| `open` | `false` | `false` | `false` | `true` |
+| `exec` | `false` | `true` | `false` | `true` |
+| `sessions` | `true` | `false` | `true` | `false` |
+| `close` | `false` | `false` | `true` | `false` |
+| `put` | `false` | `true` | `true` | `true` |
+| `get` | `false` | `true` | `true` | `true` |
+
+`exec` is destructive because it runs an arbitrary command, not because every
+command it runs is destructive. `put` and `get` are destructive because scp
+overwrites the destination without a prompt. The hints let hosts warn the user
+before a call; the [safety model](#safety-model) still enforces confirmations on
+its own.
 
 ## Credentials
 
@@ -206,6 +229,21 @@ cp skill/remote-ssh/SKILL.md ~/.dsh/skills/remote-ssh/
 ```sh
 dsh plugin --profile <profile> remove dsh-ssh-mcp
 ```
+
+## Development
+
+The package has no runtime or development dependencies. The suite uses
+`--test-isolation=none`, so it needs Node.js 22.8 or newer:
+
+```sh
+npm test
+```
+
+`server/test/tools.test.mjs` covers each of the seven tools,
+`tools.metadata.test.mjs` guards the annotations, `rpc.test.mjs` covers the
+JSON-RPC envelope, and `index.test.mjs` performs a real stdio handshake when the
+environment allows spawning a child process. CI runs the suite on Node.js 22 and
+24.
 
 ## License
 
