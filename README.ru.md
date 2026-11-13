@@ -1,3 +1,5 @@
+[![M8ven Score](https://m8ven.ai/badge/mcp/extreme-russian-dsh-fandom-dsh-ssh-mcp-za9cx4?v=b4c59e7a4f75f3267957541932429935)](https://m8ven.ai/mcp/extreme-russian-dsh-fandom-dsh-ssh-mcp-za9cx4?s=readme)
+
 [English](README.md) · [Русский](README.ru.md)
 
 # dsh-ssh-mcp
